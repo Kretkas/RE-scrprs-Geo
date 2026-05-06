@@ -1,15 +1,10 @@
-# Scrapers 2.0
+# RE-scrprs-Geo
 
-Новая версия парсеров квартир для Batumi. Старый проект не трогаем и держим как архив:
+Парсеры квартир для Batumi. Проект мигрировал на GitHub.
 
+Репозиторий:
 ```text
-/Users/uladkucapalau/.openclaw/workspace/projects/1. Парсер квартир
-```
-
-Рабочий проект:
-
-```text
-/Users/uladkucapalau/.openclaw/workspace/projects/Scrapers 2.0
+https://github.com/Kretkas/RE-scrprs-Geo
 ```
 
 ## Статус
@@ -35,10 +30,11 @@ Scrapers 2.0 функционально готов:
 
 ## Быстрый запуск
 
-Из папки проекта:
+Склонировать репозиторий и перейти в папку:
 
 ```bash
-cd "/Users/uladkucapalau/.openclaw/workspace/projects/Scrapers 2.0"
+git clone https://github.com/Kretkas/RE-scrprs-Geo.git
+cd RE-scrprs-Geo
 ```
 
 Безопасная проверка без Telegram и без записи новых объявлений в SQLite:
