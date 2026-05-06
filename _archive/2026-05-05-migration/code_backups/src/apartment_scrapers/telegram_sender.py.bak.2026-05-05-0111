@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from .config import Settings
+from .image_downloader import ImageDownloader
+from .models import Listing
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SendResult:
+    success: bool
+    status: str
+    error: str | None = None
+
+
+class TelegramSender:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    def send_listing(self, listing: Listing, image_downloader: ImageDownloader | None = None) -> SendResult:
+        if self.settings.dry_run:
+            if image_downloader:
+                result = image_downloader.download_listing_images(listing)
+                ok_count = len(result.ok_images)
+                failed_count = len(result.failed_images)
+                logger.info(
+                    "dry-run: prepared local photos source=%s external_id=%s found_urls=%s downloaded=%s failed=%s url=%s",
+                    listing.source,
+                    listing.external_id,
+                    listing.photos_count,
+                    ok_count,
+                    failed_count,
+                    listing.url,
+                )
+                image_downloader.cleanup_listing(result)
+                return SendResult(success=True, status="dry_run_downloaded")
+
+            logger.info(
+                "dry-run: would send listing source=%s external_id=%s photos=%s url=%s",
+                listing.source,
+                listing.external_id,
+                listing.photos_count,
+                listing.url,
+            )
+            return SendResult(success=True, status="dry_run")
+
+        self.settings.validate_for_send()
+        raise NotImplementedError("Telegram sending will be implemented after approval.")

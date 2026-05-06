@@ -1,0 +1,8 @@
+from __future__ import annotations
+
+from ..models import Listing
+
+
+def fetch_listings() -> list[Listing]:
+    """Korter parser placeholder. Legacy logic will be ported after approval."""
+    return []

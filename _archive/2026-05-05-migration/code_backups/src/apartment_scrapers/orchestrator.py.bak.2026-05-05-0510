@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterable
+
+from .config import Settings
+from .image_downloader import ImageDownloader
+from .models import Listing
+from .scrapers import ss
+from .storage import Storage
+from .telegram_sender import TelegramSender
+
+logger = logging.getLogger(__name__)
+
+
+class Orchestrator:
+    def __init__(self, settings: Settings, storage: Storage, sender: TelegramSender, run_id: str) -> None:
+        self.settings = settings
+        self.storage = storage
+        self.sender = sender
+        self.run_id = run_id
+
+    def collect_source(self, source: str, limit: int | None = None, include_seen: bool = False) -> list[Listing]:
+        if source == "ss":
+            return ss.fetch_listings(storage=self.storage, include_seen=include_seen, max_listings=limit)
+        if source in {"myhome", "korter"}:
+            logger.info("Source %s is not ported yet; returning 0 listings", source)
+            return []
+        raise ValueError(f"Unknown source: {source}")
+
+    def run(self, sources: Iterable[str] | None = None, limit: int | None = None, include_seen: bool = False) -> int:
+        selected_sources = list(sources or ["myhome", "ss", "korter"])
+        logger.info("Starting orchestrator dry_run=%s sources=%s limit=%s include_seen=%s", self.settings.dry_run, selected_sources, limit, include_seen)
+        self.storage.initialize()
+
+        listings: list[Listing] = []
+        for source in selected_sources:
+            source_limit = limit if len(selected_sources) == 1 else None
+            source_listings = self.collect_source(source, limit=source_limit, include_seen=include_seen)
+            logger.info("Collected source=%s listings=%s", source, len(source_listings))
+            listings.extend(source_listings)
+
+        if limit is not None:
+            listings = listings[:limit]
+        logger.info("Collected total listings=%s", len(listings))
+
+        image_downloader = ImageDownloader(
+            runtime_dir=self.settings.runtime_dir,
+            run_id=self.run_id,
+            max_images=self.settings.max_photos_per_listing,
+        )
+        removed_old_runs = image_downloader.cleanup_old_runs(older_than_hours=24)
+        if removed_old_runs:
+            logger.info("ImageDownloader: cleaned old runs count=%s", removed_old_runs)
+
+        try:
+            for listing in listings:
+                if self.settings.dry_run:
+                    logger.info(
+                        "Dry-run: skip SQLite write source=%s external_id=%s",
+                        listing.source,
+                        listing.external_id,
+                    )
+                    self.sender.send_listing(listing, image_downloader=image_downloader)
+                    continue
+
+                self.storage.upsert_listing(listing)
+                self.sender.send_listing(listing, image_downloader=image_downloader)
+        finally:
+            image_downloader.cleanup_run()
+
+        logger.info("Finished orchestrator")
+        return 0

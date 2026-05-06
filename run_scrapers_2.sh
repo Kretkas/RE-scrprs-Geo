@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Scrapers 2.0 scheduled runner.
+# Default mode is real Telegram sending. Use --dry-run for a safe check.
+
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+LOG_DIR="$PROJECT_DIR/logs"
+LOG_FILE="$LOG_DIR/run_scrapers_2.log"
+PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
+MODE="send"
+
+usage() {
+  cat <<'USAGE'
+Usage: ./run_scrapers_2.sh [--send|--dry-run]
+
+  --send     Run all sources and send Telegram messages (default).
+  --dry-run  Run all sources without Telegram sending and without listing SQLite writes.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --send)
+      MODE="send"
+      shift
+      ;;
+    --dry-run)
+      MODE="dry-run"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+mkdir -p "$LOG_DIR"
+
+# Keep archived wrapper logs for 30 days and rotate current wrapper log at 10MB.
+find "$LOG_DIR" -name "run_scrapers_2.log.*" -mtime +30 -delete 2>/dev/null || true
+if [[ -f "$LOG_FILE" ]]; then
+  LOG_SIZE=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+  if [[ "$LOG_SIZE" -gt 10485760 ]]; then
+    mv "$LOG_FILE" "$LOG_FILE.$(date +%Y%m%d_%H%M%S)"
+  fi
+fi
+
+exec &> >(tee -a "$LOG_FILE")
+
+cd "$PROJECT_DIR"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "ERROR: virtualenv python not found or not executable: $PYTHON_BIN" >&2
+  exit 1
+fi
+
+export PYTHONPATH="src"
+
+echo "=== Scrapers 2.0 start $(date) ==="
+echo "Project: $PROJECT_DIR"
+PYTHON_VERSION="$($PYTHON_BIN --version 2>&1)"
+echo "Python: $PYTHON_BIN ($PYTHON_VERSION)"
+echo "Mode: $MODE"
+echo "Wrapper log: $LOG_FILE"
+
+if [[ "$MODE" == "dry-run" ]]; then
+  "$PYTHON_BIN" -m apartment_scrapers.main \
+    --source myhome \
+    --source ss \
+    --source korter \
+    --dry-run
+else
+  "$PYTHON_BIN" -m apartment_scrapers.main \
+    --source myhome \
+    --source ss \
+    --source korter \
+    --send
+fi
+
+STATUS=$?
+echo "=== Scrapers 2.0 finished $(date), status=$STATUS ==="
+exit "$STATUS"

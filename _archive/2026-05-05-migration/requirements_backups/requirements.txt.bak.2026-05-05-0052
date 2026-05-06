@@ -1,0 +1,21 @@
+# Core scraping
+scrapling
+curl_cffi
+playwright
+beautifulsoup4
+lxml
+
+# HTTP / Telegram / retries
+requests
+httpx
+tenacity
+
+# Config / CLI / output
+python-dotenv
+pydantic
+pydantic-settings
+typer
+rich
+
+# Logging
+loguru
