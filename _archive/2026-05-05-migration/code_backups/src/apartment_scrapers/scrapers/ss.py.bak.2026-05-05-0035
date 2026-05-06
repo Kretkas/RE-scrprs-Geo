@@ -1,8 +1,0 @@
-from __future__ import annotations
-
-from ..models import Listing
-
-
-def fetch_listings() -> list[Listing]:
-    """SS.ge parser placeholder. Photo handling will be redesigned after approval."""
-    return []
