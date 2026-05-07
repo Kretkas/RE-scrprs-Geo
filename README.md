@@ -1,32 +1,10 @@
 # RE-scrprs-Geo
 
-Apartment scrapers for Batumi. The project has migrated to GitHub.
-
+Apartment scrapers for Batumi. 
 Repository:
 ```text
 https://github.com/Kretkas/RE-scrprs-Geo
 ```
-
-## Status
-
-**Current as of 2026-05-05 13:46.**
-
-Scrapers 2.0 is functionally ready:
-
-- SS.ge migrated and tested.
-- MyHome migrated and tested.
-- Korter migrated and tested.
-- Global dry-run across all sources completed successfully.
-- Full manual production run completed successfully.
-- SQLite records sent listings and delivery attempts.
-- Telegram retries on `429` are working.
-- Photos are sent via local download and Telegram media group.
-- Telegram album limit is enforced: maximum 10 photos per listing.
-
-Remaining optional tasks:
-
-- set up scheduling from scratch, e.g., daily execution at 10:00;
-- monitor the new fallback for `PHOTO_INVALID_DIMENSIONS` during the next actual run.
 
 ## Installation and Usage
 
