@@ -1,52 +1,52 @@
 # RE-scrprs-Geo
 
-Парсеры квартир для Batumi. Проект мигрировал на GitHub.
+Apartment scrapers for Batumi. The project has migrated to GitHub.
 
-Репозиторий:
+Repository:
 ```text
 https://github.com/Kretkas/RE-scrprs-Geo
 ```
 
-## Статус
+## Status
 
-**Актуально на 2026-05-05 13:46.**
+**Current as of 2026-05-05 13:46.**
 
-Scrapers 2.0 функционально готов:
+Scrapers 2.0 is functionally ready:
 
-- SS.ge перенесён и проверен.
-- MyHome перенесён и проверен.
-- Korter перенесён и проверен.
-- Общий dry-run всех источников прошёл успешно.
-- Полный ручной боевой запуск прошёл успешно.
-- SQLite фиксирует отправленные объявления и попытки отправки.
-- Telegram retry на `429` работает.
-- Фото отправляются через локальную загрузку и Telegram media group.
-- Лимит Telegram-альбома соблюдается: максимум 10 фото на объявление.
+- SS.ge migrated and tested.
+- MyHome migrated and tested.
+- Korter migrated and tested.
+- Global dry-run across all sources completed successfully.
+- Full manual production run completed successfully.
+- SQLite records sent listings and delivery attempts.
+- Telegram retries on `429` are working.
+- Photos are sent via local download and Telegram media group.
+- Telegram album limit is enforced: maximum 10 photos per listing.
 
-Осталось по желанию:
+Remaining optional tasks:
 
-- создать расписание с нуля, например ежедневный запуск в 10:00;
-- при следующем реальном запуске проследить новый fallback для `PHOTO_INVALID_DIMENSIONS`.
+- set up scheduling from scratch, e.g., daily execution at 10:00;
+- monitor the new fallback for `PHOTO_INVALID_DIMENSIONS` during the next actual run.
 
-## Установка и запуск
+## Installation and Usage
 
-Рекомендуемый Python: **3.13** (используется локальное виртуальное окружение, глобальный pyenv менять не нужно).
+Recommended Python: **3.13** (a local virtual environment is used, no need to change the global pyenv).
 
-Склонировать репозиторий и перейти в папку:
+Clone the repository and enter the directory:
 
 ```bash
 git clone https://github.com/Kretkas/RE-scrprs-Geo.git
 cd RE-scrprs-Geo
 ```
 
-### Установка в одну команду
+### One-command Installation
 
 ```bash
 bash scripts/setup.sh
 ```
-Скрипт создаст `.venv`, установит `requirements.txt`, скачает браузеры Chromium (Playwright/Patchright) и запустит проверочный dry-run.
+The script will create a `.venv`, install `requirements.txt`, download Chromium browsers (Playwright/Patchright), and run a verification dry-run.
 
-### Ручная установка
+### Manual Installation
 
 ```bash
 python3.13 -m venv .venv
@@ -56,23 +56,23 @@ python3.13 -m venv .venv
 .venv/bin/python -m patchright install chromium
 ```
 
-### Запуск парсеров
+### Running the Scrapers
 
-Безопасная проверка без Telegram и без записи новых объявлений в SQLite:
+Safe verification without Telegram or writing new listings to SQLite:
 
 ```bash
 ./run_scrapers_2.sh --dry-run
 ```
 
-Боевой запуск всех источников:
+Production run across all sources:
 
 ```bash
 ./run_scrapers_2.sh --send
 ```
 
-Без аргументов `run_scrapers_2.sh` работает как `--send`.
+Without arguments, `run_scrapers_2.sh` defaults to `--send`.
 
-### Зависимости (Dependency intent)
+### Dependencies (Dependency intent)
 
 - `scrapling` — browser-like scraping / anti-bot resilience.
 - `curl_cffi`, `playwright`, `patchright`, `msgspec`, `browserforge` — explicit Scrapling browser/stealth stack dependencies.
@@ -84,122 +84,122 @@ python3.13 -m venv .venv
 - `typer`, `rich` — future CLI and readable console output.
 - `loguru` — optional richer logging if standard logging becomes too clunky.
 
-## CLI напрямую
+## Direct CLI Usage
 
-Общий запуск через Python:
+General execution via Python:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main
 ```
 
-Примеры:
+Examples:
 
 ```bash
-# Все источники, dry-run
+# All sources, dry-run
 PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main --source myhome --source ss --source korter --dry-run
 
-# Один источник, dry-run
+# Single source, dry-run
 PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main --source ss --dry-run
 
-# Один источник, максимум 3 объявления, реальная отправка
+# Single source, max 3 listings, actual dispatch
 PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main --source myhome --limit 3 --send
 
-# Диагностика с уже виденными объявлениями
+# Diagnostics including already seen listings
 PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main --source korter --limit 3 --include-seen --dry-run
 ```
 
-Флаги:
+Flags:
 
-- `--dry-run` — не отправляет Telegram и не записывает новые объявления в SQLite.
-- `--send` — разрешает реальную отправку в Telegram.
-- `--source myhome|ss|korter` — выбрать источник; можно указать несколько раз.
-- `--limit N` — ограничить количество объявлений.
-- `--include-seen` — включить объявления, уже присутствующие в SQLite; только для диагностики.
+- `--dry-run` — prevents Telegram dispatch and avoids writing new listings to SQLite.
+- `--send` — allows actual dispatch to Telegram.
+- `--source myhome|ss|korter` — selects a source; can be specified multiple times.
+- `--limit N` — caps the number of listings processed.
+- `--include-seen` — includes listings already present in SQLite; for diagnostics only.
 
-## Что делает система
+## How the System Works
 
-Для каждого источника порядок такой:
+For each source, the workflow is:
 
-1. Собрать свежие объявления за последние 24 часа.
-2. Отфильтровать уже виденные через SQLite.
-3. Отправить шапку источника.
-4. Отправить объявления с фото.
-5. Записать результат в SQLite.
-6. Перейти к следующему источнику.
+1. Fetch fresh listings from the past 24 hours.
+2. Filter out already seen listings via SQLite.
+3. Send the source header message.
+4. Send the listings along with their photos.
+5. Record the outcome in SQLite.
+6. Proceed to the next source.
 
-Источники обрабатываются последовательно:
+Sources are processed sequentially:
 
 ```text
 MyHome → SS.ge → Korter
 ```
 
-## Сообщения в Telegram
+## Telegram Messages
 
-Если объявления найдены, отправляется шапка:
-
-```text
-🟢 Новые квартиры с MYHOME
-За последние 24 часа найдено: N
-
-🩷 Новые квартиры с SS.GE
-За последние 24 часа найдено: N
-
-🟣 Новые квартиры с KORTER
-За последние 24 часа найдено: N
-```
-
-Если объявлений нет, для любого источника отправляется сообщение вида:
+If listings are found, a header is sent:
 
 ```text
-🔍 За последние 24 часа новых квартир на MYHOME не найдено.
-🔍 За последние 24 часа новых квартир на SS.GE не найдено.
-🔍 За последние 24 часа новых квартир на KORTER не найдено.
+🟢 New apartments from MYHOME
+Found in the last 24 hours: N
+
+🩷 New apartments from SS.GE
+Found in the last 24 hours: N
+
+🟣 New apartments from KORTER
+Found in the last 24 hours: N
 ```
 
-В `--dry-run` эти сообщения только логируются.
+If no listings are found for a source, a message like this is sent:
 
-## Фото и Telegram fallback
+```text
+🔍 No new apartments found on MYHOME in the last 24 hours.
+🔍 No new apartments found on SS.GE in the last 24 hours.
+🔍 No new apartments found on KORTER in the last 24 hours.
+```
 
-- Фото сначала скачиваются локально в `runtime/images/<run_id>/`.
-- В Telegram отправляется media group.
-- Если фото больше 10, берутся первые 10.
-- После отправки временные папки очищаются.
-- При `429 Too Many Requests` код ждёт `retry_after` и повторяет запрос.
+In `--dry-run` mode, these messages are only logged.
 
-Особый случай: `PHOTO_INVALID_DIMENSIONS`.
+## Photos and Telegram Fallback
 
-Если Telegram отклоняет альбом и сообщает, что конкретное фото имеет неверные размеры:
+- Photos are first downloaded locally to `runtime/images/<run_id>/`.
+- A media group is sent to Telegram.
+- If there are more than 10 photos, only the first 10 are used.
+- Temporary folders are cleaned up after dispatch.
+- Upon encountering `429 Too Many Requests`, the code waits for the `retry_after` duration and retries.
 
-1. код определяет проблемное фото по `message #N`;
-2. удаляет его из набора;
-3. повторяет отправку именно альбомом;
-4. если валидный альбом собрать невозможно — отправляет текст со ссылкой;
-5. фото больше не рассыпаются отдельными сообщениями.
+Special case: `PHOTO_INVALID_DIMENSIONS`.
 
-## Данные и состояние
+If Telegram rejects the album because a specific photo has invalid dimensions:
 
-SQLite-база:
+1. the code identifies the problematic photo via `message #N`;
+2. removes it from the set;
+3. retries sending the remainder as an album;
+4. if a valid album cannot be formed, it sends a text message with the link instead;
+5. photos are no longer fragmented into separate individual messages.
+
+## Data and State
+
+SQLite database:
 
 ```text
 data/scrapers.db
 ```
 
-Основные таблицы:
+Primary tables:
 
-- `listings` — объявления, seen/sent статус, количество фото.
-- `send_attempts` — попытки отправки, Telegram message IDs, retry count.
-- `runs` — таблица под историю запусков; пока почти не используется.
+- `listings` — listing records, seen/sent statuses, and photo counts.
+- `send_attempts` — dispatch attempts, Telegram message IDs, and retry counts.
+- `runs` — execution history table; largely unused at the moment.
 
-Legacy seen-файлы импортированы:
+Legacy seen files have been imported:
 
-- MyHome: 416 уникальных ID.
-- SS.ge: 444 уникальных ID.
+- MyHome: 416 unique IDs.
+- SS.ge: 444 unique IDs.
 
-Старые `seen_*.txt` больше не используются в новой логике.
+The old `seen_*.txt` files are no longer utilized by the new logic.
 
-## Логи
+## Logs
 
-Основные логи:
+Primary logs:
 
 ```text
 logs/app.log
@@ -208,66 +208,66 @@ logs/runs/<run_id>.log
 logs/run_scrapers_2.log
 ```
 
-`run_id` создаётся на каждый запуск и позволяет найти отдельный лог в `logs/runs/`.
+A `run_id` is generated for each execution, making it easy to find specific logs under `logs/runs/`.
 
-`run_scrapers_2.sh` дополнительно пишет wrapper-лог в:
+`run_scrapers_2.sh` also writes a wrapper log to:
 
 ```text
 logs/run_scrapers_2.log
 ```
 
-Wrapper-лог ротируется при размере больше 10 MB; старые wrapper-логи старше 30 дней удаляются.
+The wrapper log is rotated when it exceeds 10 MB; old wrapper logs older than 30 days are pruned.
 
-## Проверенные запуски
+## Verified Runs
 
-### Индивидуальные проверки
+### Individual Tests
 
-- SS.ge dry-run прошёл успешно.
-- SS.ge real send прошёл успешно.
-- MyHome dry-run прошёл успешно.
-- MyHome real send прошёл успешно.
-- Korter dry-run прошёл успешно.
-- Korter real send прошёл успешно.
+- SS.ge dry-run completed successfully.
+- SS.ge real send completed successfully.
+- MyHome dry-run completed successfully.
+- MyHome real send completed successfully.
+- Korter dry-run completed successfully.
+- Korter real send completed successfully.
 
-### Общий dry-run
+### Global Dry-run
 
-Команда:
+Command:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m compileall -q src/apartment_scrapers && PYTHONPATH=src .venv/bin/python -m apartment_scrapers.main --source myhome --source ss --source korter --dry-run
 ```
 
-Результат:
+Outcome:
 
 - `run_id=20260505_124042`
-- всего найдено 17 fresh unseen объявлений;
+- 17 fresh unseen listings found in total;
 - MyHome: 9;
 - SS.ge: 5;
 - Korter: 3;
-- Telegram не трогался;
-- SQLite не писал новые объявления;
-- временные фото очищены.
+- Telegram was untouched;
+- SQLite didn't persist new listings;
+- temporary photos were cleaned up.
 
-### Финальный ручной боевой запуск
+### Final Manual Production Run
 
-Команда:
+Command:
 
 ```bash
 ./run_scrapers_2.sh --send
 ```
 
-Результат:
+Outcome:
 
 - `run_id=20260505_125825`
 - exit status `0`
-- всего отправлено 20 fresh unseen объявлений;
+- 20 fresh unseen listings sent in total;
 - MyHome: 10;
 - SS.ge: 8;
 - Korter: 2;
-- SQLite подтвердил все отправки;
-- временные фото очищены.
+- SQLite acknowledged all dispatches;
+- temporary photos were cleaned up.
 
-Состояние SQLite после запуска:
+SQLite state after the run:
 
 ```text
 korter sent=5
@@ -277,7 +277,7 @@ ss legacy_seen=441
 ss sent=13
 ```
 
-## Структура проекта
+## Project Structure
 
 ```text
 RE-scrprs-Geo/
@@ -314,25 +314,25 @@ RE-scrprs-Geo/
         korter.py
 ```
 
-## Безопасность и правила работы
+## Security and Operating Guidelines
 
-- Старый проект не редактировать.
-- Перед изменением существующих файлов в `Scrapers 2.0` делать бэкап.
-- Секреты не печатать и не хардкодить.
-- Любая реальная Telegram-отправка — только после явного подтверждения.
-- Любое расписание/cron/launchd — только после отдельного явного решения.
+- Do not edit the legacy project.
+- Back up existing files in `Scrapers 2.0` before modifying them.
+- Never print or hardcode secrets.
+- Any real Telegram dispatch must only occur after explicit confirmation.
+- Any scheduling/cron/launchd setup should only proceed following a separate deliberate decision.
 
-## Следующий шаг
+## Next Steps
 
-Если нужно автоматизировать запуск, создать расписание с нуля.
+If execution automation is desired, set up scheduling from scratch.
 
-Рекомендуемый вариант:
+Recommended configuration:
 
 ```text
-каждый день в 10:00 → /Users/uladkucapalau/.openclaw/workspace/projects/RE-scrprs-Geo/run_scrapers_2.sh --send
+daily at 10:00 → /Users/uladkucapalau/.openclaw/workspace/projects/RE-scrprs-Geo/run_scrapers_2.sh --send
 ```
 
-Перед созданием расписания можно ещё раз вручную выполнить:
+Before setting up the schedule, you might want to perform another manual verification:
 
 ```bash
 ./run_scrapers_2.sh --dry-run
