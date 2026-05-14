@@ -158,10 +158,6 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
     building_info = item.get("building", {})
     building_name = building_info.get("name", "") if isinstance(building_info, dict) else ""
     full_address = f"{address_part} ({building_name})" if building_name else str(address_part)
-    
-    district = item.get("subLocalityNominative")
-    if district:
-        full_address = f"{full_address}, {district}"
 
     rooms = item.get("roomCount")
     layout_str = get_layout_string(rooms)
