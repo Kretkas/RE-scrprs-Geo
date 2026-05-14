@@ -123,10 +123,11 @@ def fetch_detail_data(url: str) -> dict[str, Any]:
                     photo_urls.append(photo)
         
         publish_time = layout.get("publishTime")
-        return {"photos": photo_urls, "publishTime": publish_time}
+        floors_by_house = layout.get("floorsByHouse", [])
+        return {"photos": photo_urls, "publishTime": publish_time, "floorsByHouse": floors_by_house}
     except Exception as e:
         logger.warning("Korter: failed to fetch detail data url=%s: %s", url, e)
-        return {"photos": [], "publishTime": None}
+        return {"photos": [], "publishTime": None, "floorsByHouse": []}
 
 def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = None) -> Listing | None:
     if item.get("availableStatus") != "available":
@@ -154,6 +155,14 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
     item_floors = item.get("floorNumbers", [])
     floor = item_floors[0] if isinstance(item_floors, list) and item_floors else "-"
 
+    if detail_data is None:
+        detail_data = {}
+
+    total_floors_list = detail_data.get("floorsByHouse", [])
+    total_floors = "-"
+    if isinstance(total_floors_list, list) and total_floors_list and isinstance(total_floors_list[0], dict):
+        total_floors = str(total_floors_list[0].get("floorCount", "-")) or "-"
+
     address_part = item.get("address") or "Адрес не указан"
     building_info = item.get("building", {})
     building_name = building_info.get("name", "") if isinstance(building_info, dict) else ""
@@ -167,12 +176,9 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
     caption = (
         f"📍 <b>Адрес:</b> {full_address}\n"
         f"💰 <b>Цена:</b> {price_string}\n{layout_line}"
-        f"📏 <b>Площадь:</b> {area} кв.м. | 🏢 <b>Этаж:</b> {floor}\n"
+        f"📏 <b>Площадь:</b> {area} кв.м. | 🏢 <b>Этаж:</b> {floor}/{total_floors}\n"
         f"🔗 <a href=\"{url}\">Смотреть объявление на Korter</a>"
     )
-
-    if detail_data is None:
-        detail_data = {}
 
     photo_urls = detail_data.get("photos", [])
     if not photo_urls:
@@ -199,7 +205,7 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
         price_per_m2=price_per_m2,
         area=str(area),
         floor=str(floor),
-        total_floors="-",  # Not available in listing data
+        total_floors=total_floors,
         layout=layout_str,
         published_at=published_at,
         photo_urls=photo_urls,
