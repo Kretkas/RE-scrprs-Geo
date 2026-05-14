@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -102,7 +103,28 @@ def _detail_url_from_item(item: dict[str, Any]) -> str | None:
     return f"https://korter.ge{urllib.parse.quote(link_part)}"
 
 
-def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
+def fetch_detail_photos(url: str) -> list[str]:
+    try:
+        resp = cffi_requests.get(url, impersonate="chrome110", timeout=30)
+        state = extract_initial_state(resp.text)
+        layout = state.get("layoutLandingStore", {}).get("layout", {})
+        images_data = layout.get("images", [])
+        
+        photo_urls = []
+        for img in images_data:
+            if not isinstance(img, dict): continue
+            media = img.get("mediaSrc", {}).get("default", {})
+            if isinstance(media, dict):
+                photo = media.get("x2") or media.get("x1")
+                if photo:
+                    if photo.startswith("//"): photo = "https:" + photo
+                    photo_urls.append(photo)
+        return photo_urls
+    except Exception as e:
+        logger.warning("Korter: failed to fetch detail photos url=%s: %s", url, e)
+        return []
+
+def build_listing_from_item(item: dict[str, Any], detail_photos: list[str] = None) -> Listing | None:
     if item.get("availableStatus") != "available":
         return None
 
@@ -149,14 +171,16 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         f"🔗 <a href=\"{url}\">Смотреть объявление на Korter</a>"
     )
 
-    photo_urls = []
-    media = item.get("mediaSrc", {}).get("default", {})
-    if media:
-        photo = media.get("x2") or media.get("x1")
-        if photo:
-            if photo.startswith("//"):
-                photo = "https:" + photo
-            photo_urls.append(photo)
+    photo_urls = detail_photos if detail_photos else []
+    if not photo_urls:
+        # Fallback to the single default photo if detail fetch failed
+        media = item.get("mediaSrc", {}).get("default", {})
+        if media:
+            photo = media.get("x2") or media.get("x1")
+            if photo:
+                if photo.startswith("//"):
+                    photo = "https:" + photo
+                photo_urls.append(photo)
 
     published_at = parse_korter_datetime(item.get("actualizeTime"))
 
@@ -181,7 +205,7 @@ def fetch_listings(
     storage: Storage | None = None,
     hours: int = 24,
     max_pages: int = 3,
-    max_workers: int = 5,  # Kept for compatibility, though not used anymore
+    max_workers: int = 5,
     include_seen: bool = False,
     max_listings: int | None = None,
 ) -> list[Listing]:
@@ -190,6 +214,7 @@ def fetch_listings(
 
     listings: list[Listing] = []
     session_seen_ids: set[str] = set()
+    candidates: list[dict[str, Any]] = []
     
     try:
         html = fetch_korter_page(page=1)
@@ -205,54 +230,70 @@ def fetch_listings(
 
     logger.info("Korter: %d pages total to process", total_pages)
     
-    # Process page 1 since we already fetched it
-    raw_apartments = state.get("apartmentListingStore", {}).get("apartments", [])
-    
-    # Process remaining pages
+    # Collect candidates from all requested pages
     for page in range(1, total_pages + 1):
         if page > 1:
             try:
                 html = fetch_korter_page(page=page)
                 state = extract_initial_state(html)
-                raw_apartments = state.get("apartmentListingStore", {}).get("apartments", [])
             except Exception as e:
                 logger.error("Korter: page %d failed: %s", page, e)
                 break
-
-        added_from_page = 0
+        
+        raw_apartments = state.get("apartmentListingStore", {}).get("apartments", [])
+        
         for item in raw_apartments:
-            listing = build_listing_from_item(item)
-            if not listing:
+            if item.get("availableStatus") != "available":
                 continue
-                
-            if listing.external_id in session_seen_ids:
-                continue
-            session_seen_ids.add(listing.external_id)
-
-            if not include_seen and storage and storage.is_seen(SOURCE, listing.external_id):
-                logger.debug("Korter: skip seen id=%s", listing.external_id)
-                continue
-
-            item_date = listing.published_at
-            if not item_date:
-                logger.debug("Korter: skip id=%s reason=no-date", listing.external_id)
-                continue
-                
-            if item_date <= cutoff_time:
-                logger.debug("Korter: skip old id=%s date=%s", listing.external_id, item_date.isoformat())
-                continue
-
-            listings.append(listing)
-            added_from_page += 1
             
+            external_id = str(item.get("objectId"))
+            if not external_id or external_id == "None":
+                continue
+                
+            if external_id in session_seen_ids:
+                continue
+            session_seen_ids.add(external_id)
+
+            if not include_seen and storage and storage.is_seen(SOURCE, external_id):
+                continue
+
+            item_date = parse_korter_datetime(item.get("actualizeTime"))
+            if not item_date or item_date <= cutoff_time:
+                continue
+                
+            candidates.append(item)
+            
+        logger.info("Korter: page %d/%d processed", page, total_pages)
+
+    logger.info("Korter: collected %d fresh candidates", len(candidates))
+    
+    if not candidates:
+        return []
+
+    # Fetch detail pages concurrently for photos
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_item = {}
+        for item in candidates:
+            url = _detail_url_from_item(item)
+            if url:
+                future = executor.submit(fetch_detail_photos, url)
+                future_to_item[future] = item
+                
+        for future in as_completed(future_to_item):
+            item = future_to_item[future]
+            try:
+                photos = future.result()
+            except Exception as e:
+                logger.error("Korter: unexpected detail fetch error: %s", e)
+                photos = []
+                
+            listing = build_listing_from_item(item, detail_photos=photos)
+            if listing:
+                listings.append(listing)
+                
             if max_listings is not None and len(listings) >= max_listings:
                 logger.info("Korter: reached max_listings=%s", max_listings)
                 break
-                
-        logger.info("Korter: page %d/%d, added %d fresh items", page, total_pages, added_from_page)
-        
-        if max_listings is not None and len(listings) >= max_listings:
-            break
 
     mode = "including seen" if include_seen else "fresh unseen"
     logger.info("Korter: finished with %s %s listings", len(listings), mode)
