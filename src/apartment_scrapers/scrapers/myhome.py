@@ -151,7 +151,7 @@ def fetch_listings(
         }
 
         try:
-            response = requests.get(API_URL, params=params, timeout=30)
+            response = requests.get(API_URL, params=params, headers={"Accept": "application/json, text/plain, */*", "Origin": "https://www.myhome.ge", "Referer": "https://www.myhome.ge/", "X-Website-Key": "myhome", "locale": "ru", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"}, timeout=30)
             response.raise_for_status()
             payload = response.json()
             items = payload.get("data", {}).get("data", [])
