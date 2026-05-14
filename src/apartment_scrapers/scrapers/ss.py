@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import urllib.parse
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import time
+import asyncio
 
-import requests
+import httpx
 
 from ..models import Listing
 from ..storage import Storage
@@ -15,42 +18,47 @@ from ..storage import Storage
 logger = logging.getLogger(__name__)
 
 SOURCE = "ss"
-API_URL = "https://api-gateway.ss.ge/v1/RealEstate/LegendSearch"
+SEARCH_URL = "https://api-gateway.ss.ge/v1/RealEstate/LegendSearch"
+SESSION_URL = "https://home.ss.ge/ru/"
 
-_token_cache = {"token": None, "expires_at": 0}
+HEADERS = {
+    "Accept": "application/json",
+    "Origin": "https://home.ss.ge",
+    "Referer": "https://home.ss.ge/",
+    "os": "web",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+    ),
+}
 
-def get_token() -> str | None:
-    now = time.time()
-    if _token_cache["token"] and now < _token_cache["expires_at"]:
-        return _token_cache["token"]
+_token_cache = {"token": None, "expires_at": 0, "cookies": None}
 
+def get_token() -> tuple[str, httpx.Cookies]:
+    if time.time() < _token_cache["expires_at"] - 60 and _token_cache["cookies"]:
+        return _token_cache["token"], _token_cache["cookies"]
+
+    logger.info("SS.ge API: refreshing token")
     try:
-        response = requests.post(
-            "https://account.ss.ge/connect/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": "ssweb",
-                "client_secret": "t5w42KQQjowNRYkycrrX",
-                "scope": "web_apigateway",
-            },
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-            },
-            timeout=15
-        )
-        response.raise_for_status()
-        data = response.json()
-        token = data.get("access_token")
-        if token:
-            _token_cache["token"] = token
-            _token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
-            logger.info("SS: new token obtained, valid for %ds", data.get("expires_in", 3600))
-            return token
-        logger.warning("SS: Could not find access_token in response")
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
+            session_resp = client.get(
+                SESSION_URL,
+                headers=HEADERS,
+            )
+        session_resp.raise_for_status()
+        cookies = session_resp.cookies
+        token = cookies.get("ss-session-token")
+        if not token:
+            raise RuntimeError("SS.ge did not provide ss-session-token")
     except Exception as e:
-        logger.exception("SS: Failed to fetch token: %s", e)
-    return None
+        logger.error("SS.ge API: token refresh failed: %s", e)
+        raise
+
+    _token_cache["token"] = token
+    _token_cache["cookies"] = cookies
+    _token_cache["expires_at"] = time.time() + 3600
+    logger.info("SS.ge API: new anonymous session token obtained")
+    return _token_cache["token"], _token_cache["cookies"]
 
 def parse_ss_datetime(raw: str | None) -> datetime | None:
     if not raw:
@@ -160,6 +168,47 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         photo_urls=photo_urls,
     )
 
+async def _fetch_ss_api_page(page: int) -> list[dict]:
+    try:
+        token, cookies = get_token()
+    except Exception:
+        return []
+
+    body = {
+        "realEstateDealType": 4,
+        "realEstateType": 5,
+        "cityIdList": [96],
+        "subdistrictIds": [57, 58, 59, 63, 64, 65, 66, 91],
+        "currencyId": 2,
+        "priceType": 1,
+        "page": page,
+        "pageSize": 20
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                SEARCH_URL,
+                json=body,
+                headers={**HEADERS, "Authorization": f"Bearer {token}"},
+                cookies=cookies,
+            )
+            resp.raise_for_status()
+    except httpx.TimeoutException:
+        logger.error("SS.ge API: timeout on page %d", page)
+        return []
+    except httpx.HTTPStatusError as e:
+        logger.error("SS.ge API: HTTP %d %s", e.response.status_code, e.response.text)
+        return []
+    except httpx.RequestError as e:
+        logger.error("SS.ge API: request error: %s", e)
+        return []
+
+    data = resp.json()
+    items = data.get("realStateItemModel", [])
+    logger.info("SS.ge API: fetched %d items (page %d)", len(items), page)
+    return items
+
 def fetch_listings(
     storage: Storage | None = None,
     hours: int = 24,
@@ -171,21 +220,6 @@ def fetch_listings(
     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     logger.info("SS: searching listings published after %s", cutoff_time.isoformat())
 
-    token = get_token()
-    if not token:
-        logger.error("SS: Failed to get auth token")
-        return []
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-        "Origin": "https://home.ss.ge",
-        "Referer": "https://home.ss.ge/",
-        "os": "web",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-    }
-
     session_seen_ids: set[str] = set()
     candidates: list[Listing] = []
     stop_pagination = False
@@ -195,63 +229,43 @@ def fetch_listings(
             break
         logger.info("SS: fetch search page=%s", page_num)
 
-        payload = {
-            "cityIdList": [96],
-            "subdistrictIds": [57, 58, 59, 63, 64, 65, 66, 91],
-            "realEstateDealType": 4,
-            "realEstateType": 5,
-            "currencyId": 2,
-            "order": 1,
-            "priceType": 1,
-            "advancedSearch": {"individualEntityOnly": True},
-            "page": page_num,
-        }
+        items = asyncio.run(_fetch_ss_api_page(page_num))
+        if not items:
+            logger.info("SS: no items on search page=%s", page_num)
+            break
 
-        try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+        for item in items:
+            item_id = str(item.get("applicationId", "")).strip()
+            if not item_id or item_id in session_seen_ids:
+                continue
+            session_seen_ids.add(item_id)
 
-            items = data.get("realStateItemModel", [])
-            if not items:
-                logger.info("SS: no items on search page=%s", page_num)
+            if not include_seen and storage and storage.is_seen(SOURCE, item_id):
+                logger.info("SS: skip seen id=%s", item_id)
+                continue
+
+            item_date = parse_ss_datetime(item.get("orderDate"))
+            if not item_date:
+                logger.info("SS: skip id=%s reason=no-date", item_id)
+                continue
+
+            is_vip = (item.get("vipStatus", 0) or 0) > 0
+            if item_date <= cutoff_time:
+                if is_vip:
+                    logger.info("SS: skip old vip id=%s date=%s", item_id, item_date.isoformat())
+                    continue
+                stop_pagination = True
+                logger.info("SS: stop pagination at old non-vip id=%s date=%s", item_id, item_date.isoformat())
                 break
 
-            for item in items:
-                item_id = str(item.get("applicationId", "")).strip()
-                if not item_id or item_id in session_seen_ids:
-                    continue
-                session_seen_ids.add(item_id)
-
-                if not include_seen and storage and storage.is_seen(SOURCE, item_id):
-                    logger.info("SS: skip seen id=%s", item_id)
-                    continue
-
-                item_date = parse_ss_datetime(item.get("orderDate"))
-                if not item_date:
-                    logger.info("SS: skip id=%s reason=no-date", item_id)
-                    continue
-
-                is_vip = (item.get("vipStatus", 0) or 0) > 0
-                if item_date <= cutoff_time:
-                    if is_vip:
-                        logger.info("SS: skip old vip id=%s date=%s", item_id, item_date.isoformat())
-                        continue
+            listing = build_listing_from_item(item)
+            if listing:
+                candidates.append(listing)
+                logger.info("SS: candidate id=%s date=%s url=%s", listing.external_id, item_date.isoformat(), listing.url)
+                if max_listings is not None and len(candidates) >= max_listings:
                     stop_pagination = True
-                    logger.info("SS: stop pagination at old non-vip id=%s date=%s", item_id, item_date.isoformat())
+                    logger.info("SS: reached max_listings=%s", max_listings)
                     break
-
-                listing = build_listing_from_item(item)
-                if listing:
-                    candidates.append(listing)
-                    logger.info("SS: candidate id=%s date=%s url=%s", listing.external_id, item_date.isoformat(), listing.url)
-                    if max_listings is not None and len(candidates) >= max_listings:
-                        stop_pagination = True
-                        logger.info("SS: reached max_listings=%s", max_listings)
-                        break
-        except Exception as e:
-            logger.exception("SS: search page failed page=%s error=%s", page_num, e)
-            break
 
     mode = "including seen" if include_seen else "fresh unseen"
     logger.info("SS: collected %s %s candidates", len(candidates), mode)
