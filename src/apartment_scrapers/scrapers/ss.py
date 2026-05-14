@@ -126,7 +126,12 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
 
     area = item.get("totalArea", "Н/у")
     floor = item.get("floorNumber", "-") or "-"
-    total_floors = item.get("totalAmountOfFloor", "-") or "-"
+    
+    total_floors_raw = item.get("totalAmountOfFloor")
+    if isinstance(total_floors_raw, float) and total_floors_raw.is_integer():
+        total_floors = str(int(total_floors_raw))
+    else:
+        total_floors = str(total_floors_raw) if total_floors_raw is not None else "-"
 
     address_info = item.get("address", {}) or {}
     district = address_info.get("subdistrictTitle", "")
@@ -161,7 +166,7 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         price_per_m2="",
         area=str(area),
         floor=str(floor),
-        total_floors=str(total_floors),
+        total_floors=total_floors,
         layout=layout_str,
         published_at=parse_ss_datetime(item.get("orderDate")),
         photo_urls=photo_urls,
