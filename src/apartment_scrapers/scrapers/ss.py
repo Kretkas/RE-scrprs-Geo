@@ -140,7 +140,7 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
     full_address = ", ".join(filter(None, [district, full_street])) or "Адрес не указан"
 
     caption = (
-        f"📍 <b>Адрес:</b> Батуми, {full_address}\n"
+        f"📍 <b>Адрес:</b> {full_address}\n"
         f"💰 <b>Цена:</b> {price_string}\n{layout_line}"
         f"📏 <b>Площадь:</b> {area} кв.м. | 🏢 <b>Этаж:</b> {floor}/{total_floors}\n"
         f"🔗 <a href=\"{url_link}\">Смотреть объявление на SS</a>"
@@ -156,7 +156,7 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         external_id=item_id,
         url=url_link,
         caption=caption,
-        address=f"Батуми, {full_address}",
+        address=full_address,
         price=price_string,
         price_per_m2="",
         area=str(area),
