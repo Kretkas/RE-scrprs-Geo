@@ -30,8 +30,6 @@ The script will create a `.venv`, install `requirements.txt`, download Chromium 
 python3.13 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m playwright install chromium
-.venv/bin/python -m patchright install chromium
 ```
 
 ### Running the Scrapers
@@ -52,8 +50,7 @@ Without arguments, `run_scrapers_2.sh` defaults to `--send`.
 
 ### Dependencies (Dependency intent)
 
-- `scrapling` — browser-like scraping / anti-bot resilience (currently only used for Korter; MyHome and SS.ge use direct JSON APIs).
-- `curl_cffi`, `playwright`, `patchright`, `msgspec`, `browserforge` — explicit Scrapling browser/stealth stack dependencies.
+- `curl_cffi` — stealth TLS requests (used for Korter to bypass Cloudflare/bot protections).
 - `beautifulsoup4`, `lxml` — HTML parsing.
 - `requests` — compatibility with legacy Telegram code.
 - `httpx` — future cleaner Telegram/client implementation.
@@ -61,6 +58,8 @@ Without arguments, `run_scrapers_2.sh` defaults to `--send`.
 - `python-dotenv`, `pydantic`, `pydantic-settings` — structured config.
 - `typer`, `rich` — future CLI and readable console output.
 - `loguru` — optional richer logging if standard logging becomes too clunky.
+
+*Note: The old browser stack (Playwright, Patchright, Camoufox, Scrapling) was completely removed to optimize performance and reduce RAM usage.*
 
 ## Direct CLI Usage
 
@@ -139,7 +138,9 @@ In `--dry-run` mode, these messages are only logged.
 ## Photos and Telegram Fallback
 
 - **MyHome** & **SS.ge** operate strictly via JSON APIs.
-  - *Note on SS.ge photos:* The search API returns a maximum of 4 preview images per listing to keep the process ultra-fast. If full albums (10+ photos) are required in the future, a secondary lightweight fetch to the listing's detail page can be implemented.
+- **Korter** uses `curl_cffi` to mimic Chrome TLS signatures and parses the `INITIAL_STATE` JSON directly from the HTML source, bypassing browser protection without actually launching headless browsers.
+  - *Note on SS.ge photos:* The search API returns a maximum of 4 preview images per listing to keep the process ultra-fast.
+  - *Note on Korter photos:* The scraper fetches the detail page via lightweight HTTP request to extract the full photo gallery (up to 10 photos).
 - Photos are first downloaded locally to `runtime/images/<run_id>/`.
 - A media group is sent to Telegram.
 - If there are more than 10 photos, only the first 10 are used.
