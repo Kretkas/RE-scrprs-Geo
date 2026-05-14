@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  scrapers:
+    build: .
+    container_name: re_scrapers_geo
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # The container runs in UTC by default.
+    # Our scheduler.py expects UTC times.
