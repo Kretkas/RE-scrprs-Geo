@@ -89,7 +89,7 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
     floor = item.get("floor", "-") or "-"
     total_floors = item.get("total_floors", "-") or "-"
     full_address = ", ".join(
-        filter(None, [item.get("city_name"), item.get("district_name"), item.get("address")])
+        filter(None, [item.get("district_name"), item.get("address")])
     ) or "Адрес не указан"
 
     caption = (
