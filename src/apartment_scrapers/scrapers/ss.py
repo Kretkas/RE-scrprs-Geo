@@ -111,16 +111,15 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
     if sq_price:
         price_string += f" ({sq_price}/м²)"
 
-    rooms = item.get("rooms")
+    rooms = item.get("roomCount")
     if rooms is None:
         title = item.get("title", "")
-        rooms_match = re.search(r"(\d+)-комнатная", title)
+        # title is often something like "იყიდება 3 ოთახიანი ბინა..." or "Продается 3-комнатная..."
+        rooms_match = re.search(r"(\d+)[\s-]*(?:ოთახიანი|комнатная)", title)
         if rooms_match:
             rooms = rooms_match.group(1)
 
-    bedrooms = item.get("bedrooms")
-    if bedrooms is None:
-        bedrooms = item.get("numberOfBedrooms")
+    bedrooms = item.get("numberOfBedrooms")
 
     layout_str = get_layout_string(rooms, bedrooms)
     layout_line = f"🛏️ <b>Планировка:</b> {layout_str}\n" if layout_str else ""
