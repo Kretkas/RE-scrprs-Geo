@@ -6,3 +6,9 @@ data/
 __pycache__/
 *.pyc
 work/
+
+# Ignore old bash execution files
+run*.pid
+mycron
+dry_run*.py
+cron.log
