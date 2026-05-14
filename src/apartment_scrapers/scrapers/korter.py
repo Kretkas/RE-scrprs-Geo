@@ -79,8 +79,10 @@ def get_layout_string(rooms: Any) -> str | None:
     except (ValueError, TypeError):
         return None
 
-    if rooms_int > 0:
-        return f"{rooms_int}-комн."
+    if rooms_int == 1:
+        return "Студия"
+    if rooms_int > 1:
+        return f"{rooms_int - 1}+1"
     return None
 
 
