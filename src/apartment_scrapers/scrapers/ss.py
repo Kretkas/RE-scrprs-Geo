@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+import time
 
-from bs4 import BeautifulSoup
-from scrapling.fetchers import StealthyFetcher
+import requests
 
 from ..models import Listing
 from ..storage import Storage
@@ -18,39 +15,42 @@ from ..storage import Storage
 logger = logging.getLogger(__name__)
 
 SOURCE = "ss"
-BASE_URL_TEMPLATE = (
-    "https://home.ss.ge/ru/недвижимость/l/Квартира/Продается"
-    "?cityIdList=96"
-    "&subdistrictIds=57%2C58%2C59%2C63%2C64%2C65%2C66%2C91"
-    "&currencyId=2"
-    "&advancedSearch=%7B%22individualEntityOnly%22%3Atrue%7D"
-    "&order=1"
-    "&page={}"
-)
+API_URL = "https://api-gateway.ss.ge/v1/RealEstate/LegendSearch"
 
-NEXT_DATA_RE = re.compile(
-    r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
-    re.DOTALL,
-)
+_token_cache = {"token": None, "expires_at": 0}
 
+def get_token() -> str | None:
+    now = time.time()
+    if _token_cache["token"] and now < _token_cache["expires_at"]:
+        return _token_cache["token"]
 
-@dataclass(frozen=True)
-class ImageExtractionResult:
-    urls: list[str]
-    source: str
-    error: str | None = None
-
-
-def _unique_urls(urls: list[str]) -> list[str]:
-    return list(dict.fromkeys(url for url in urls if url and url.startswith("http")))
-
-
-def _parse_next_data(html: str) -> dict[str, Any] | None:
-    match = NEXT_DATA_RE.search(html)
-    if not match:
-        return None
-    return json.loads(match.group(1))
-
+    try:
+        response = requests.post(
+            "https://account.ss.ge/connect/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": "ssweb",
+                "client_secret": "t5w42KQQjowNRYkycrrX",
+                "scope": "web_apigateway",
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+            },
+            timeout=15
+        )
+        response.raise_for_status()
+        data = response.json()
+        token = data.get("access_token")
+        if token:
+            _token_cache["token"] = token
+            _token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
+            logger.info("SS: new token obtained, valid for %ds", data.get("expires_in", 3600))
+            return token
+        logger.warning("SS: Could not find access_token in response")
+    except Exception as e:
+        logger.exception("SS: Failed to fetch token: %s", e)
+    return None
 
 def parse_ss_datetime(raw: str | None) -> datetime | None:
     if not raw:
@@ -61,7 +61,6 @@ def parse_ss_datetime(raw: str | None) -> datetime | None:
     except ValueError:
         logger.warning("SS: cannot parse orderDate=%r", raw)
         return None
-
 
 def get_layout_string(rooms: Any, bedrooms: Any) -> str | None:
     if rooms is None:
@@ -81,44 +80,6 @@ def get_layout_string(rooms: Any, bedrooms: Any) -> str | None:
     if rooms_int > 0:
         return f"{rooms_int}-комн."
     return None
-
-
-def extract_images_from_html(html: str) -> ImageExtractionResult:
-    next_data_images: list[str] = []
-    try:
-        data = _parse_next_data(html)
-        if data:
-            app_data = data.get("props", {}).get("pageProps", {}).get("applicationData", {})
-            app_images = app_data.get("appImages", []) or []
-            for img in app_images:
-                img_url = img.get("fileName") if isinstance(img, dict) else None
-                if img_url:
-                    next_data_images.append(img_url)
-    except Exception as exc:
-        logger.warning("SS: image __NEXT_DATA__ parse failed: %s", exc)
-
-    next_data_images = _unique_urls(next_data_images)
-    if next_data_images:
-        return ImageExtractionResult(urls=next_data_images, source="__NEXT_DATA__")
-
-    soup = BeautifulSoup(html, "html.parser")
-    og_images = _unique_urls(
-        [meta.get("content", "") for meta in soup.find_all("meta", property="og:image")]
-    )
-    if og_images:
-        return ImageExtractionResult(urls=og_images, source="og:image")
-
-    return ImageExtractionResult(urls=[], source="none", error="no images found in __NEXT_DATA__ or og:image")
-
-
-def fetch_images_for_listing(url: str) -> ImageExtractionResult:
-    try:
-        page = StealthyFetcher.fetch(url, headless=True, timeout=60000)
-        return extract_images_from_html(page.html_content)
-    except Exception as exc:
-        logger.exception("SS: detail fetch/image extraction failed url=%s", url)
-        return ImageExtractionResult(urls=[], source="error", error=str(exc))
-
 
 def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
     item_id = str(item.get("applicationId", "")).strip()
@@ -178,6 +139,11 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         f"🔗 <a href=\"{url_link}\">Смотреть объявление на SS</a>"
     )
 
+    photo_urls = []
+    for img in item.get("appImages", []):
+        if isinstance(img, dict) and "fileName" in img:
+            photo_urls.append(img["fileName"])
+
     return Listing(
         source=SOURCE,
         external_id=item_id,
@@ -185,14 +151,14 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         caption=caption,
         address=f"Батуми, {full_address}",
         price=price_string,
+        price_per_m2="",
         area=str(area),
         floor=str(floor),
         total_floors=str(total_floors),
         layout=layout_str,
         published_at=parse_ss_datetime(item.get("orderDate")),
-        photo_urls=[],
+        photo_urls=photo_urls,
     )
-
 
 def fetch_listings(
     storage: Storage | None = None,
@@ -205,6 +171,21 @@ def fetch_listings(
     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
     logger.info("SS: searching listings published after %s", cutoff_time.isoformat())
 
+    token = get_token()
+    if not token:
+        logger.error("SS: Failed to get auth token")
+        return []
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "Origin": "https://home.ss.ge",
+        "Referer": "https://home.ss.ge/",
+        "os": "web",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+    }
+
     session_seen_ids: set[str] = set()
     candidates: list[Listing] = []
     stop_pagination = False
@@ -212,17 +193,26 @@ def fetch_listings(
     for page_num in range(1, max_pages + 1):
         if stop_pagination:
             break
-        url = BASE_URL_TEMPLATE.format(page_num)
         logger.info("SS: fetch search page=%s", page_num)
 
-        try:
-            page = StealthyFetcher.fetch(url, headless=True, timeout=120000)
-            data = _parse_next_data(page.html_content)
-            if not data:
-                logger.warning("SS: no __NEXT_DATA__ on search page=%s", page_num)
-                break
+        payload = {
+            "cityIdList": [96],
+            "subdistrictIds": [57, 58, 59, 63, 64, 65, 66, 91],
+            "realEstateDealType": 4,
+            "realEstateType": 5,
+            "currencyId": 2,
+            "order": 1,
+            "priceType": 1,
+            "advancedSearch": {"individualEntityOnly": True},
+            "page": page_num,
+        }
 
-            items = data["props"]["pageProps"]["applicationList"].get("realStateItemModel", [])
+        try:
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            items = data.get("realStateItemModel", [])
             if not items:
                 logger.info("SS: no items on search page=%s", page_num)
                 break
@@ -259,58 +249,10 @@ def fetch_listings(
                         stop_pagination = True
                         logger.info("SS: reached max_listings=%s", max_listings)
                         break
-        except Exception:
-            logger.exception("SS: search page failed page=%s", page_num)
+        except Exception as e:
+            logger.exception("SS: search page failed page=%s error=%s", page_num, e)
             break
 
     mode = "including seen" if include_seen else "fresh unseen"
-    logger.info("SS: collected %s %s candidates; fetching photos", len(candidates), mode)
-    if not candidates:
-        return []
-
-    listing_by_id = {listing.external_id: listing for listing in candidates}
-    image_results: dict[str, ImageExtractionResult] = {}
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_id = {
-            executor.submit(fetch_images_for_listing, listing.url): listing.external_id
-            for listing in candidates
-        }
-        for future in as_completed(future_to_id):
-            external_id = future_to_id[future]
-            try:
-                result = future.result()
-            except Exception as exc:
-                logger.exception("SS: unexpected image future failure id=%s", external_id)
-                result = ImageExtractionResult(urls=[], source="future_error", error=str(exc))
-            image_results[external_id] = result
-
-    listings: list[Listing] = []
-    for external_id, listing in listing_by_id.items():
-        result = image_results.get(external_id, ImageExtractionResult([], "missing", "image result missing"))
-        with_photos = Listing(
-            source=listing.source,
-            external_id=listing.external_id,
-            url=listing.url,
-            caption=listing.caption,
-            address=listing.address,
-            price=listing.price,
-            price_per_m2=listing.price_per_m2,
-            area=listing.area,
-            floor=listing.floor,
-            total_floors=listing.total_floors,
-            layout=listing.layout,
-            published_at=listing.published_at,
-            photo_urls=result.urls,
-        )
-        logger.info(
-            "SS: photos id=%s count=%s source=%s error=%s",
-            external_id,
-            len(result.urls),
-            result.source,
-            result.error,
-        )
-        listings.append(with_photos)
-
-    logger.info("SS: finished with %s listings", len(listings))
-    return listings
+    logger.info("SS: collected %s %s candidates", len(candidates), mode)
+    return candidates
