@@ -105,7 +105,7 @@ def _detail_url_from_item(item: dict[str, Any]) -> str | None:
     return f"https://korter.ge{urllib.parse.quote(link_part)}"
 
 
-def fetch_detail_photos(url: str) -> list[str]:
+def fetch_detail_data(url: str) -> dict[str, Any]:
     try:
         resp = cffi_requests.get(url, impersonate="chrome110", timeout=30)
         state = extract_initial_state(resp.text)
@@ -121,12 +121,14 @@ def fetch_detail_photos(url: str) -> list[str]:
                 if photo:
                     if photo.startswith("//"): photo = "https:" + photo
                     photo_urls.append(photo)
-        return photo_urls
+        
+        publish_time = layout.get("publishTime")
+        return {"photos": photo_urls, "publishTime": publish_time}
     except Exception as e:
-        logger.warning("Korter: failed to fetch detail photos url=%s: %s", url, e)
-        return []
+        logger.warning("Korter: failed to fetch detail data url=%s: %s", url, e)
+        return {"photos": [], "publishTime": None}
 
-def build_listing_from_item(item: dict[str, Any], detail_photos: list[str] = None) -> Listing | None:
+def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = None) -> Listing | None:
     if item.get("availableStatus") != "available":
         return None
 
@@ -173,7 +175,10 @@ def build_listing_from_item(item: dict[str, Any], detail_photos: list[str] = Non
         f"🔗 <a href=\"{url}\">Смотреть объявление на Korter</a>"
     )
 
-    photo_urls = detail_photos if detail_photos else []
+    if detail_data is None:
+        detail_data = {}
+
+    photo_urls = detail_data.get("photos", [])
     if not photo_urls:
         # Fallback to the single default photo if detail fetch failed
         media = item.get("mediaSrc", {}).get("default", {})
@@ -184,7 +189,9 @@ def build_listing_from_item(item: dict[str, Any], detail_photos: list[str] = Non
                     photo = "https:" + photo
                 photo_urls.append(photo)
 
-    published_at = parse_korter_datetime(item.get("actualizeTime"))
+    # Use publishTime from detail page if available, fallback to actualizeTime
+    publish_raw = detail_data.get("publishTime") or item.get("actualizeTime")
+    published_at = parse_korter_datetime(publish_raw)
 
     return Listing(
         source=SOURCE,
@@ -259,38 +266,40 @@ def fetch_listings(
             if not include_seen and storage and storage.is_seen(SOURCE, external_id):
                 continue
 
-            item_date = parse_korter_datetime(item.get("actualizeTime"))
-            if not item_date or item_date <= cutoff_time:
-                continue
+            # We can no longer filter by date here, because publishTime is only
+            # available on the detail page. actualizeTime is just an update time.
                 
             candidates.append(item)
             
         logger.info("Korter: page %d/%d processed", page, total_pages)
 
-    logger.info("Korter: collected %d fresh candidates", len(candidates))
+    logger.info("Korter: collected %d candidates to check detail pages", len(candidates))
     
     if not candidates:
         return []
 
-    # Fetch detail pages concurrently for photos
+    # Fetch detail pages concurrently for photos and actual publishTime
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_item = {}
         for item in candidates:
             url = _detail_url_from_item(item)
             if url:
-                future = executor.submit(fetch_detail_photos, url)
+                future = executor.submit(fetch_detail_data, url)
                 future_to_item[future] = item
                 
         for future in as_completed(future_to_item):
             item = future_to_item[future]
             try:
-                photos = future.result()
+                detail_data = future.result()
             except Exception as e:
                 logger.error("Korter: unexpected detail fetch error: %s", e)
-                photos = []
+                detail_data = {"photos": [], "publishTime": None}
                 
-            listing = build_listing_from_item(item, detail_photos=photos)
+            listing = build_listing_from_item(item, detail_data=detail_data)
             if listing:
+                # Now that we have the real publishTime, filter out old listings
+                if listing.published_at and listing.published_at <= cutoff_time:
+                    continue
                 listings.append(listing)
                 
             if max_listings is not None and len(listings) >= max_listings:
