@@ -52,7 +52,7 @@ Without arguments, `run_scrapers_2.sh` defaults to `--send`.
 
 ### Dependencies (Dependency intent)
 
-- `scrapling` — browser-like scraping / anti-bot resilience (currently used for SS.ge and Korter; MyHome uses direct JSON API).
+- `scrapling` — browser-like scraping / anti-bot resilience (currently only used for Korter; MyHome and SS.ge use direct JSON APIs).
 - `curl_cffi`, `playwright`, `patchright`, `msgspec`, `browserforge` — explicit Scrapling browser/stealth stack dependencies.
 - `beautifulsoup4`, `lxml` — HTML parsing.
 - `requests` — compatibility with legacy Telegram code.
@@ -138,6 +138,8 @@ In `--dry-run` mode, these messages are only logged.
 
 ## Photos and Telegram Fallback
 
+- **MyHome** & **SS.ge** operate strictly via JSON APIs.
+  - *Note on SS.ge photos:* The search API returns a maximum of 4 preview images per listing to keep the process ultra-fast. If full albums (10+ photos) are required in the future, a secondary lightweight fetch to the listing's detail page can be implemented.
 - Photos are first downloaded locally to `runtime/images/<run_id>/`.
 - A media group is sent to Telegram.
 - If there are more than 10 photos, only the first 10 are used.
