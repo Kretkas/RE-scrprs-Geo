@@ -169,7 +169,7 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
 
     area = area_value if area_value is not None else "Не указана"
     caption = (
-        f"📍 <b>Адрес:</b> Батуми, {full_address}\n"
+        f"📍 <b>Адрес:</b> {full_address}\n"
         f"💰 <b>Цена:</b> {price_string}\n{layout_line}"
         f"📏 <b>Площадь:</b> {area} кв.м. | 🏢 <b>Этаж:</b> {floor}\n"
         f"🔗 <a href=\"{url}\">Смотреть объявление на Korter</a>"
@@ -198,7 +198,7 @@ def build_listing_from_item(item: dict[str, Any], detail_data: dict[str, Any] = 
         external_id=external_id,
         url=url,
         caption=caption,
-        address=f"Батуми, {full_address}",
+        address=full_address,
         price=price_string,
         price_per_m2=price_per_m2,
         area=str(area),
