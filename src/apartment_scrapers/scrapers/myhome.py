@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from scrapling.fetchers import StealthyFetcher
+import requests
 
 from ..models import Listing
 from ..storage import Storage
@@ -14,34 +12,7 @@ from ..storage import Storage
 logger = logging.getLogger(__name__)
 
 SOURCE = "myhome"
-BASE_URL_TEMPLATE = (
-    "https://www.myhome.ge/ru/nedvizhimost/prodazha/staroe-zdanie/kvartira/"
-    "batumi/aeroportis-ubani/"
-    "?deal_types=1"
-    "&real_estate_types=1"
-    "&currency_id=1"
-    "&CardView=3"
-    "&statuses=1%2C2%2C3"
-    "&conditions=1%2C2%2C3%2C4%2C6%2C7%2C8%2C5"
-    "&cities=15"
-    "&urbans=77%2C73%2C72%2C74%2C75%2C76%2C71"
-    "&districts=15%2C9%2C8%2C10%2C11%2C13%2C7"
-    "&page={}"
-    "&owner_type=physical"
-)
-
-NEXT_DATA_RE = re.compile(
-    r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
-    re.DOTALL,
-)
-
-
-def _parse_next_data(html: str) -> dict[str, Any] | None:
-    match = NEXT_DATA_RE.search(html)
-    if not match:
-        return None
-    return json.loads(match.group(1))
-
+API_URL = "https://api-statements.tnet.ge/v1/statements"
 
 def parse_myhome_datetime(raw: str | None) -> datetime | None:
     if not raw:
@@ -51,7 +22,6 @@ def parse_myhome_datetime(raw: str | None) -> datetime | None:
     except ValueError:
         logger.warning("MyHome: cannot parse last_updated=%r", raw)
         return None
-
 
 def get_layout_string(rooms: Any, bedrooms: Any) -> str | None:
     if rooms is None:
@@ -72,30 +42,10 @@ def get_layout_string(rooms: Any, bedrooms: Any) -> str | None:
         return f"{rooms_int}-комн."
     return None
 
-
-def extract_listing_items(data: dict[str, Any]) -> list[dict[str, Any]]:
-    queries = data.get("props", {}).get("pageProps", {}).get("dehydratedState", {}).get("queries", [])
-    for query in queries:
-        state = query.get("state", {}) if isinstance(query, dict) else {}
-        state_data = state.get("data")
-        if not isinstance(state_data, dict):
-            continue
-        possible_listings = state_data.get("data", {}).get("data")
-        if (
-            isinstance(possible_listings, list)
-            and possible_listings
-            and isinstance(possible_listings[0], dict)
-            and "price" in possible_listings[0]
-        ):
-            return possible_listings
-    return []
-
-
 def _format_price(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"${int(value):,}"
     return str(value) if value not in {None, ""} else "Нет цены"
-
 
 def _format_square_price(value: Any) -> str | None:
     if isinstance(value, (int, float)):
@@ -103,7 +53,6 @@ def _format_square_price(value: Any) -> str | None:
     if value not in {None, ""}:
         return str(value)
     return None
-
 
 def _image_urls(item: dict[str, Any]) -> list[str]:
     images_data = item.get("images", []) or []
@@ -116,9 +65,8 @@ def _image_urls(item: dict[str, Any]) -> list[str]:
             urls.append(image_url)
     return list(dict.fromkeys(urls))
 
-
 def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
-    item_id = str(item.get("id", "")).strip()
+    item_id = str(item.get("statement_id", "")).strip() or str(item.get("id", "")).strip()
     if not item_id:
         return None
 
@@ -167,7 +115,6 @@ def build_listing_from_item(item: dict[str, Any]) -> Listing | None:
         photo_urls=_image_urls(item),
     )
 
-
 def fetch_listings(
     storage: Storage | None = None,
     hours: int = 24,
@@ -185,23 +132,36 @@ def fetch_listings(
     for page_num in range(1, max_pages + 1):
         if stop_pagination:
             break
-        url = BASE_URL_TEMPLATE.format(page_num)
+            
         logger.info("MyHome: fetch search page=%s", page_num)
+        
+        params = {
+            "locale": "ru",
+            "deal_types": "1",
+            "real_estate_types": "1",
+            "currency_id": "1",
+            "CardView": "3",
+            "statuses": "1,2,3",
+            "conditions": "1,2,3,4,6,7,8,5",
+            "cities": "15",
+            "urbans": "77,73,72,74,75,76,71",
+            "districts": "15,9,8,10,11,13,7",
+            "owner_type": "physical",
+            "page": page_num
+        }
 
         try:
-            page = StealthyFetcher.fetch(url, headless=True, timeout=240000)
-            data = _parse_next_data(page.html_content)
-            if not data:
-                logger.warning("MyHome: no __NEXT_DATA__ on search page=%s", page_num)
-                break
-
-            items = extract_listing_items(data)
+            response = requests.get(API_URL, params=params, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            items = payload.get("data", {}).get("data", [])
+            
             if not items:
                 logger.info("MyHome: no listings on search page=%s", page_num)
                 break
 
             for item in items:
-                item_id = str(item.get("id", "")).strip()
+                item_id = str(item.get("statement_id", "")).strip() or str(item.get("id", "")).strip()
                 if not item_id or item_id in session_seen_ids:
                     continue
                 session_seen_ids.add(item_id)

@@ -1,24 +1,5 @@
-# Core scraping
-scrapling
-curl_cffi
-playwright
-patchright
-msgspec
-browserforge
-beautifulsoup4
-lxml
-
-# HTTP / Telegram / retries
-requests
-httpx
-tenacity
-
-# Config / CLI / output
-python-dotenv
-pydantic
-pydantic-settings
-typer
-rich
-
-# Logging
-loguru
+playwright>=1.41.0
+playwright-stealth>=1.0.6
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+requests>=2.31.0

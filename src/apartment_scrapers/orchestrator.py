@@ -13,7 +13,6 @@ from .telegram_sender import TelegramSender
 
 logger = logging.getLogger(__name__)
 
-
 class Orchestrator:
     def __init__(self, settings: Settings, storage: Storage, sender: TelegramSender, run_id: str) -> None:
         self.settings = settings
@@ -140,7 +139,7 @@ class Orchestrator:
             )
 
     def run(self, sources: Iterable[str] | None = None, limit: int | None = None, include_seen: bool = False) -> int:
-        selected_sources = list(sources or ["myhome", "ss", "korter"])
+        selected_sources = list(sources or self.settings.active_sources)
         logger.info("Starting orchestrator dry_run=%s sources=%s limit=%s include_seen=%s", self.settings.dry_run, selected_sources, limit, include_seen)
         self.storage.initialize()
 
@@ -156,11 +155,17 @@ class Orchestrator:
         total_listings = 0
         try:
             for source in selected_sources:
-                source_limit = limit if len(selected_sources) == 1 else None
+                if limit is not None:
+                    source_limit = limit
+                else:
+                    source_limit = getattr(self.settings, f"limit_{source}", None)
+                
                 listings = self.collect_source(source, limit=source_limit, include_seen=include_seen)
-                if limit is not None and len(selected_sources) > 1:
+                
+                if limit is not None:
                     remaining = max(limit - total_listings, 0)
                     listings = listings[:remaining]
+                
                 logger.info("Collected source=%s listings=%s", source, len(listings))
                 total_listings += len(listings)
 
