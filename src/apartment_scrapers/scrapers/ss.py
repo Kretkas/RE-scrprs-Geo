@@ -179,7 +179,7 @@ async def _fetch_ss_api_page(page: int) -> list[dict]:
         "realEstateDealType": 4,
         "cityIdList": [96],
         "subdistrictIds": [57, 58, 59, 63, 64, 65, 66, 91],
-        "currencyId": 1,
+        "currencyId": 2,
         "advancedSearch": {
             "individualEntityOnly": True
         },
