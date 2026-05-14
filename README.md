@@ -52,7 +52,7 @@ Without arguments, `run_scrapers_2.sh` defaults to `--send`.
 
 ### Dependencies (Dependency intent)
 
-- `scrapling` — browser-like scraping / anti-bot resilience (currently only used for Korter, MyHome uses direct JSON API).
+- `scrapling` — browser-like scraping / anti-bot resilience (currently used for SS.ge and Korter; MyHome uses direct JSON API).
 - `curl_cffi`, `playwright`, `patchright`, `msgspec`, `browserforge` — explicit Scrapling browser/stealth stack dependencies.
 - `beautifulsoup4`, `lxml` — HTML parsing.
 - `requests` — compatibility with legacy Telegram code.
