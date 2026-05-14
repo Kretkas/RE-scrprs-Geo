@@ -175,12 +175,14 @@ async def _fetch_ss_api_page(page: int) -> list[dict]:
         return []
 
     body = {
-        "realEstateDealType": 4,
         "realEstateType": 5,
+        "realEstateDealType": 4,
         "cityIdList": [96],
         "subdistrictIds": [57, 58, 59, 63, 64, 65, 66, 91],
-        "currencyId": 2,
-        "priceType": 1,
+        "currencyId": 1,
+        "advancedSearch": {
+            "individualEntityOnly": True
+        },
         "page": page,
         "pageSize": 20
     }
